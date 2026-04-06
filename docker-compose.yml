@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: scan-link-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: scan_link_backend
+    ports:
+      - "5432:5432"
+    volumes:
+      - scan_link_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d scan_link_backend"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  scan_link_postgres_data:
