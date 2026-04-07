@@ -20,13 +20,13 @@ Amaç:
 
 ```mermaid
 flowchart LR
-    A[Branch UI\nbranch-test-ui] -->|POST /api/branch/invites| B[scan-link-backend\nRust + Axum]
-    B -->|SMTP| C[E-posta]
-    C --> D[Müşteri\nqr-scanner-ui linki açar]
-    D -->|GET /api/public/invites/{token}/claim| B
-    D -->|POST /api/public/sessions/{invite_id}/submit\n x-session-token| B
+    A["Branch UI<br/>branch-test-ui"] -->|"POST /api/branch/invites"| B["scan-link-backend<br/>Rust + Axum"]
+    B -->|"SMTP"| C["E-posta"]
+    C --> D["Müşteri<br/>qr-scanner-ui linki açar"]
+    D -->|"GET /api/public/invites/{token}/claim"| B
+    D -->|"POST /api/public/sessions/{invite_id}/submit<br/>x-session-token"| B
     B --> E[(PostgreSQL)]
-    A -->|GET /api/branch/invites\nGET /api/branch/invites/{id}| B
+    A -->|"GET /api/branch/invites<br/>GET /api/branch/invites/{id}"| B
 ```
 
 ---
