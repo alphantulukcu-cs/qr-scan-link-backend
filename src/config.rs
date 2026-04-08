@@ -9,6 +9,7 @@ const DEFAULT_INVITE_TTL_MINUTES: i64 = 120;
 const DEFAULT_CORS_ALLOWED_ORIGINS: &str =
     "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5174,http://localhost:5174";
 const DEFAULT_SERVICE_NAME: &str = "scan-link-backend";
+const DEFAULT_JWT_EXPIRES_MINUTES: i64 = 480;
 const DEFAULT_SMTP_PORT: u16 = 587;
 const DEFAULT_SMTP_FROM_NAME: &str = "Sekerbank Sube Operasyon";
 
@@ -33,6 +34,10 @@ pub struct AppConfig {
     pub invite_ttl_minutes: i64,
     pub cors_allowed_origins: Vec<String>,
     pub service_name: String,
+    pub employee_username: String,
+    pub employee_password: String,
+    pub jwt_secret: String,
+    pub jwt_expires_minutes: i64,
     pub smtp: Option<SmtpConfig>,
 }
 
@@ -85,6 +90,32 @@ impl AppConfig {
         }
 
         let service_name = get_env_or_default("SERVICE_NAME", DEFAULT_SERVICE_NAME)?;
+        let employee_username = get_required_env("EMPLOYEE_USERNAME")?;
+        let employee_password = get_required_env("EMPLOYEE_PASSWORD")?;
+        let jwt_secret = get_required_env("JWT_SECRET")?;
+        let jwt_expires_minutes = get_env_or_default(
+            "JWT_EXPIRES_MINUTES",
+            &DEFAULT_JWT_EXPIRES_MINUTES.to_string(),
+        )?
+        .parse::<i64>()
+        .map_err(|error| {
+            AppError::config(format!(
+                "JWT_EXPIRES_MINUTES gecersiz bir sayi olmali: {error}"
+            ))
+        })?;
+
+        if jwt_expires_minutes <= 0 {
+            return Err(AppError::config(
+                "JWT_EXPIRES_MINUTES sifirdan buyuk olmali".to_string(),
+            ));
+        }
+
+        if jwt_secret.len() < 16 {
+            return Err(AppError::config(
+                "JWT_SECRET en az 16 karakter olmali".to_string(),
+            ));
+        }
+
         let smtp = load_smtp_config()?;
 
         Ok(Self {
@@ -94,6 +125,10 @@ impl AppConfig {
             invite_ttl_minutes,
             cors_allowed_origins,
             service_name,
+            employee_username,
+            employee_password,
+            jwt_secret,
+            jwt_expires_minutes,
             smtp,
         })
     }

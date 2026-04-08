@@ -117,6 +117,65 @@ flowchart LR
    - `status=submitted`, `submitted_at` set eder,
    - `session_token_hash = NULL` yaparak oturumu kapatır.
 
+### 5.3.1 Image processing akışı (şu anki gerçek davranış)
+1. Görsel üretimi/capture müşteri tarafında (`qr-scanner-ui`) yapılır.
+2. Backend submit sırasında her çek için sadece temel doğrulama yapar:
+   - `sequence_no > 0`
+   - `qr_value` boş değil
+   - `image_data_url` boş değil
+3. Backend, gelen `qr_value` ve `image_data_url` alanlarını `trim()` ederek DB’ye yazar.
+4. Yazma işlemi transaction içinde atomik ilerler:
+   - önce aynı `invite_id` için mevcut `scan_checks` satırları silinir,
+   - sonra yeni payload satırları eklenir.
+5. Oturum özeti görseli (`batch_image_data_url`) ve `session_metadata` da aynı submit ile `scan_invites` tablosuna yazılır.
+6. Şube detay ekranında backend bu alanları olduğu gibi geri döner (`GET /api/branch/invites/{invite_id}`).
+
+Not:
+- Bu sürümde backend tarafında resize, crop, sıkıştırma, format çevirme veya OCR yok.
+- Görseller veri tabanında `data URL` (çoğunlukla `data:image/...;base64,...`) olarak tutulur.
+- Payload limiti backend ve Nginx tarafında `120 MB` olarak sınırlandırılmıştır.
+
+### 5.3.2 OpenCV çeki nasıl buluyor? (qr-scanner-ui)
+Bu kısım backend’de değil, müşteri tarafı `qr-scanner-ui` içinde çalışır.
+
+1. Canlı video frame’leri worker’a gönderilir.
+   - Tespit çözünürlüğü sabitlenir: `DETECTION_WIDTH = 640`.
+   - Yaklaşık her `120ms` bir yeni frame işlenir.
+2. Worker açılışta OpenCV.js yüklemeyi dener:
+   - Önce lokal `/opencv.js`, olmazsa CDN.
+   - Başarısız olursa otomatik `fallback` (pure JS) motora geçer.
+3. OpenCV pipeline (başarılı yüklenirse):
+   - Grayscale
+   - Gaussian blur (`5x5`)
+   - Adaptive threshold
+   - Invert + Canny (`60/180`)
+   - Morph close + dilate
+   - Contour çıkarımı (`findContours`)
+4. Contour’lardan 4 köşe (quad) çıkarılır:
+   - `approxPolyDP` ile 4 nokta aranır.
+   - Gerekirse `convexHull` + farklı epsilon değerleri denenir.
+   - Son çare `minAreaRect` ile dikdörtgen tahmini alınır.
+5. Aday quad’lar skorlama ile filtrelenir:
+   - Alan, aspect ratio, doluluk oranı
+   - Parlaklık ve doku (çekin “kâğıt” karakterine yakınlık)
+   - Merkeze yakınlık ve frame sınırına taşma cezası
+   - En yüksek skorlu aday “çek” kabul edilir.
+6. OpenCV yoksa fallback pipeline:
+   - Grayscale + Gaussian blur + Sobel kenar
+   - Adaptif edge threshold
+   - Dilate/erode ile binary maske
+   - Satır/sütun yoğunluğundan bounds tahmini
+   - Bounds’tan köşe tahmini + oran/parlaklık kontrolleri
+7. UI tarafında güvenli çekim koşulu:
+   - Köşeler yumuşatılır (jitter azaltma),
+   - Köşeler en az `500ms` stabil kalmalı,
+   - Overlay’e göre yeterince yakın olmalı (`MIN_CAPTURE_EDGE_RATIO = 0.92`),
+   - QR zorunlu modda QR okunmadan çekim butonu aktif olmaz.
+
+Not:
+- OpenCV burada esas olarak “çek kenarı/köşe bulma + siyah-beyaz iyileştirme” için kullanılıyor.
+- Perspektif düzeltme (dewarp) homography ile uygulama tarafında yapılır; backend sadece sonucu alıp kaydeder.
+
 ### 5.4 Şube istihbarat izlemesi
 - `GET /api/branch/invites` ile özet liste.
 - `GET /api/branch/invites/{invite_id}` ile çeklerin görsel + QR + metadata detayları.

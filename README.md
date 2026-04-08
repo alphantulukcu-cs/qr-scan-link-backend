@@ -149,3 +149,38 @@ Varsayılan adres: `http://127.0.0.1:8095`
 - `Request Entity Too Large` alırsan backend ve nginx yeniden başlatılmalı (yeni limitlerin etkili olması için).
 - `claim` aşamasında `not_found/expired/submitted` dönmesi beklenen güvenlik davranışıdır.
 - SMTP alanları boşsa invite kaydı oluşur, sadece mail gönderimi atlanır.
+
+## Registry Tabanlı Deployment
+
+Bu repo içinde local build yerine registry'den image pull edecek deployment akışı hazırdır.
+
+### 1) Image'ları build ve push et
+
+```bash
+docker login -u alphantulukcucs
+./scripts/build-and-push-images.sh alphantulukcucs/scan-link v1.0.0
+```
+
+Bu komut tek private repo içine 3 farklı tag push eder:
+- `alphantulukcucs/scan-link:backend-v1.0.0`
+- `alphantulukcucs/scan-link:branch-ui-v1.0.0`
+- `alphantulukcucs/scan-link:qr-ui-v1.0.0`
+
+Not: `PUSH_LATEST=true` verirsen ek olarak `backend-latest`, `branch-ui-latest`, `qr-ui-latest` tag'leri de push edilir.
+
+### 2) Private makinede env dosyalarını hazırla
+
+```bash
+cp .env.registry.example .env.registry
+```
+
+- `.env.registry` içine push edilen image tag'lerini yaz.
+- Uygulama secret/config değerleri için `.env` dosyasını ayrıca hazırla.
+
+### 3) Registry'den pull edip ayağa kaldır
+
+```bash
+docker login -u alphantulukcucs
+docker compose --env-file .env.registry -f docker-compose.registry.yml pull
+docker compose --env-file .env.registry -f docker-compose.registry.yml up -d
+```

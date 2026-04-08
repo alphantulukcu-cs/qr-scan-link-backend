@@ -12,7 +12,7 @@ use tracing::instrument;
 use crate::config::SmtpConfig;
 use crate::error::{AppError, Result};
 
-const EMBEDDED_LOGO_SVG: &str = include_str!("../../Şekerbank_logo.svg");
+const EMBEDDED_LOGO_SVG: &str = include_str!("sekerbank_logo.svg");
 
 /// SMTP email sender service.
 #[derive(Clone)]

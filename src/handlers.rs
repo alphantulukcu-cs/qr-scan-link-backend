@@ -1,6 +1,9 @@
 use axum::extract::{DefaultBodyLimit, Path, State};
+use axum::http::Request;
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method};
+use axum::middleware::{self, Next};
+use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Duration, Utc};
@@ -12,9 +15,9 @@ use tracing::{instrument, warn};
 
 use crate::error::{AppError, Result};
 use crate::models::{
-    ClaimInviteResponse, CreateInviteRequest, CreateInviteResponse, HealthResponse,
-    InviteDetailResponse, InviteSummaryResponse, SubmitSessionRequest,
-    SubmitSessionResponse, SubmittedCheckResponse,
+    ClaimInviteResponse, CreateInviteRequest, CreateInviteResponse, EmployeeLoginRequest,
+    EmployeeLoginResponse, HealthResponse, InviteDetailResponse, InviteSummaryResponse,
+    SubmitSessionRequest, SubmitSessionResponse, SubmittedCheckResponse,
 };
 use crate::services::token::{build_invite_link, derive_session_token, generate_token, hash_token};
 use crate::state::AppState;
@@ -27,12 +30,20 @@ const MAX_REQUEST_BODY_BYTES: usize = 120 * 1024 * 1024;
 pub fn router(state: AppState) -> Result<Router> {
     let cors = build_cors_layer(&state.config.cors_allowed_origins)?;
 
-    let app = Router::new()
-        .route("/api/health", get(health))
+    let branch_routes = Router::new()
         .route("/api/branch/invites", post(create_invite).get(list_invites))
         .route("/api/branch/invites/{invite_id}", get(get_invite_detail))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_branch_auth,
+        ));
+
+    let app = Router::new()
+        .route("/api/health", get(health))
+        .route("/api/auth/login", post(login_employee))
         .route("/api/public/invites/{invite_token}/claim", get(claim_invite))
         .route("/api/public/sessions/{invite_id}/submit", post(submit_session))
+        .merge(branch_routes)
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
@@ -94,6 +105,23 @@ async fn health(State(_state): State<AppState>) -> Json<HealthResponse> {
         status: "ok",
         now: Utc::now(),
     })
+}
+
+/// Authenticates branch employee and returns JWT.
+#[instrument(skip(state, payload))]
+async fn login_employee(
+    State(state): State<AppState>,
+    Json(payload): Json<EmployeeLoginRequest>,
+) -> Result<Json<EmployeeLoginResponse>> {
+    let username = validate_non_empty("username", &payload.username)?;
+    let password = validate_non_empty("password", &payload.password)?;
+    let (token, expires_at) = state.auth_service.login(&username, &password)?;
+
+    Ok(Json(EmployeeLoginResponse {
+        token,
+        username,
+        expires_at,
+    }))
 }
 
 /// Creates invite, stores it in PostgreSQL, and attempts to send email.
@@ -451,6 +479,16 @@ async fn submit_session(
     }))
 }
 
+async fn require_branch_auth(
+    State(state): State<AppState>,
+    request: Request<axum::body::Body>,
+    next: Next,
+) -> std::result::Result<Response, AppError> {
+    let token = extract_bearer_token(request.headers())?;
+    let _username = state.auth_service.verify_token(&token)?;
+    Ok(next.run(request).await)
+}
+
 fn extract_session_token(headers: &HeaderMap) -> Result<String> {
     let header_value = headers
         .get(SESSION_TOKEN_HEADER)
@@ -467,6 +505,25 @@ fn extract_session_token(headers: &HeaderMap) -> Result<String> {
     }
 
     Ok(token)
+}
+
+fn extract_bearer_token(headers: &HeaderMap) -> Result<String> {
+    let header_value = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .ok_or_else(|| AppError::unauthorized("authorization header gerekli"))?;
+    let raw = header_value
+        .to_str()
+        .map_err(|error| AppError::unauthorized(format!("authorization gecersiz: {error}")))?;
+    let token = raw
+        .strip_prefix("Bearer ")
+        .ok_or_else(|| AppError::unauthorized("authorization Bearer token formatinda olmali"))?
+        .trim();
+
+    if token.is_empty() {
+        return Err(AppError::unauthorized("authorization token bos olamaz"));
+    }
+
+    Ok(token.to_string())
 }
 
 fn validate_non_empty(field_name: &str, value: &str) -> Result<String> {
@@ -549,6 +606,7 @@ fn build_cors_layer(origins: &[String]) -> Result<CorsLayer> {
             .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
             .allow_headers([
                 CONTENT_TYPE,
+                HeaderName::from_static("authorization"),
                 HeaderName::from_static(SESSION_TOKEN_HEADER),
             ]));
     }
@@ -567,6 +625,7 @@ fn build_cors_layer(origins: &[String]) -> Result<CorsLayer> {
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers([
             CONTENT_TYPE,
+            HeaderName::from_static("authorization"),
             HeaderName::from_static(SESSION_TOKEN_HEADER),
         ]))
 }

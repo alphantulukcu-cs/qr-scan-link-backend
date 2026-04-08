@@ -95,3 +95,18 @@ pub struct HealthResponse {
     pub status: &'static str,
     pub now: DateTime<Utc>,
 }
+
+/// Request payload for employee login.
+#[derive(Debug, Deserialize)]
+pub struct EmployeeLoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+/// Response payload for employee login.
+#[derive(Debug, Serialize)]
+pub struct EmployeeLoginResponse {
+    pub token: String,
+    pub username: String,
+    pub expires_at: DateTime<Utc>,
+}
