@@ -370,18 +370,60 @@ async fn submit_session(
     headers: HeaderMap,
     Json(payload): Json<SubmitSessionRequest>,
 ) -> Result<Json<SubmitSessionResponse>> {
+    const MAX_CHECKS_PER_SESSION: usize = 50;
+
     if payload.checks.is_empty() {
         return Err(AppError::invalid_input("en az bir cek gonderilmelidir"));
     }
 
-    if payload
-        .checks
-        .iter()
-        .any(|item| item.sequence_no <= 0 || item.qr_value.trim().is_empty() || item.image_data_url.trim().is_empty())
-    {
+    if payload.checks.len() > MAX_CHECKS_PER_SESSION {
         return Err(AppError::invalid_input(
-            "cek satirlarinda sequence_no, qr_value ve image_data_url zorunludur",
+            "oturum basina maksimum 50 cek gonderilebilir",
         ));
+    }
+
+    for item in &payload.checks {
+        if item.sequence_no <= 0 {
+            return Err(AppError::invalid_input("sequence_no sifirdan buyuk olmali"));
+        }
+
+        if item.qr_value.trim().is_empty() {
+            return Err(AppError::invalid_input("qr_value bos olamaz"));
+        }
+
+        if item.image_data_url.trim().is_empty() {
+            return Err(AppError::invalid_input("image_data_url bos olamaz"));
+        }
+
+        let validation_image = item
+            .original_image_data_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| item.image_data_url.trim());
+
+        let validation = crate::services::image_validation::validate_check_image(
+            validation_image,
+            item.qr_value.trim(),
+        )?;
+
+        tracing::debug!(
+            sequence_no = item.sequence_no,
+            validation_source = if item
+                .original_image_data_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_some()
+            {
+                "original"
+            } else {
+                "processed"
+            },
+            qr_match = validation.qr_match,
+            decoded_qr_present = validation.decoded_qr.is_some(),
+            "cek gorseli dogrulandi"
+        );
     }
 
     let session_token = extract_session_token(&headers)?;

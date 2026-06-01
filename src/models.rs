@@ -68,6 +68,7 @@ pub struct SubmitCheckItemRequest {
     pub sequence_no: i32,
     pub qr_value: String,
     pub image_data_url: String,
+    pub original_image_data_url: Option<String>,
     pub captured_at: DateTime<Utc>,
     pub metadata: Option<Value>,
 }
